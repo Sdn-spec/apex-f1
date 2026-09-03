@@ -18,15 +18,33 @@ import { TimingTower } from "./components/TimingTower";
 import { TopBar } from "./components/TopBar";
 import { TrackMap } from "./components/TrackMap";
 import { DriverPanel, RaceControlFeed, StandingsView, StrategyBoard } from "./components/Views";
+import { TelemetryPanel } from "./components/Telemetry";
+import { RadioFeed } from "./components/Radio";
+import { AnalysisView } from "./components/Charts";
+import { CalendarView } from "./components/Calendar";
 
-type Tab = "race" | "timing" | "strategy" | "driver" | "standings" | "control";
+type Tab =
+  | "race"
+  | "timing"
+  | "strategy"
+  | "analysis"
+  | "driver"
+  | "telemetry"
+  | "radio"
+  | "standings"
+  | "calendar"
+  | "control";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "race", label: "Race" },
   { id: "timing", label: "Timing" },
   { id: "strategy", label: "Strategy" },
+  { id: "analysis", label: "Analysis" },
   { id: "driver", label: "Driver" },
+  { id: "telemetry", label: "Telemetry" },
+  { id: "radio", label: "Radio" },
   { id: "standings", label: "Standings" },
+  { id: "calendar", label: "Calendar" },
   { id: "control", label: "Race Control" },
 ];
 
@@ -447,6 +465,43 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            )}
+
+            {tab === "analysis" && (
+              <AnalysisView
+                session={session}
+                snapshot={snapshot}
+                selected={selected}
+                onSelect={pickDriver}
+              />
+            )}
+
+            {tab === "telemetry" && (
+              <TelemetryPanel session={session} driver={selectedDriver} now={snapshot.now} />
+            )}
+
+            {tab === "radio" && (
+              <div style={{ padding: 14, height: "100%", minHeight: 0 }}>
+                <div className="panel" style={{ height: "100%" }}>
+                  <div className="panel-head">
+                    <h2>Team radio</h2>
+                    <span style={{ fontSize: 11, color: "var(--text-faint)" }}>
+                      {snapshot.radio.length} clips
+                    </span>
+                  </div>
+                  <div className="panel-body">
+                    <RadioFeed clips={snapshot.radio} drivers={snapshot.byNumber} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === "calendar" && (
+              <CalendarView
+                year={info.year}
+                currentKey={info.session_key}
+                onPick={(picked) => void load(picked)}
+              />
             )}
 
             {tab === "standings" && (

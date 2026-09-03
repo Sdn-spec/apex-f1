@@ -652,6 +652,238 @@ button {
   letter-spacing: -0.02em;
 }
 
+.driver-photo {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  border-radius: 99px;
+  object-fit: cover;
+  object-position: top center;
+  border: 2px solid;
+  background: #0d0f16;
+  flex: none;
+}
+
+/* ---- team radio ---- */
+
+.radio-row {
+  display: grid;
+  grid-template-columns: 38px 54px 1fr auto 74px;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  transition: background 0.15s ease;
+}
+.radio-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.radio-row[data-playing="true"] {
+  background: rgba(255, 255, 255, 0.06);
+}
+.radio-play {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 99px;
+  border: 1.5px solid;
+  font-size: 10px;
+  color: var(--text);
+}
+.radio-driver {
+  font-weight: 800;
+  font-size: 14px;
+}
+.radio-name {
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.radio-row time {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: right;
+}
+.radio-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 15px;
+}
+.radio-bars i {
+  width: 3px;
+  border-radius: 2px;
+  animation: bars 0.9s ease-in-out infinite;
+}
+.radio-bars i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.radio-bars i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.radio-bars i:nth-child(4) {
+  animation-delay: 0.45s;
+}
+@keyframes bars {
+  0%,
+  100% {
+    height: 4px;
+  }
+  50% {
+    height: 15px;
+  }
+}
+
+/* ---- charts ---- */
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+.legend-chip:hover,
+.legend-chip[data-on="true"] {
+  color: var(--text);
+  border-color: #3d4a6b;
+}
+.legend-chip i {
+  width: 9px;
+  height: 9px;
+  border-radius: 99px;
+}
+
+/* ---- calendar ---- */
+
+.countdown {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 22px;
+  flex-direction: row;
+}
+.countdown-label {
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  font-weight: 700;
+}
+.countdown h3 {
+  margin: 6px 0 4px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.countdown p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.countdown-clock {
+  display: flex;
+  gap: 10px;
+}
+.countdown-clock div {
+  min-width: 62px;
+  padding: 10px 6px;
+  border-radius: 11px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-soft);
+  text-align: center;
+}
+.countdown-clock b {
+  display: block;
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+.countdown-clock span {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.weekend {
+  display: grid;
+  grid-template-columns: 54px 190px 130px 1fr;
+  gap: 14px;
+  align-items: center;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.weekend[data-past="true"] {
+  opacity: 0.52;
+}
+.weekend-round {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.weekend-round b {
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+.weekend-where b {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+}
+.weekend-where span {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.weekend-when {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.weekend-sessions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1000px) {
+  .weekend {
+    grid-template-columns: 44px 1fr;
+    row-gap: 8px;
+  }
+  .weekend-when,
+  .weekend-sessions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+  .countdown {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 /* ---- tables ---- */
 
 .table {

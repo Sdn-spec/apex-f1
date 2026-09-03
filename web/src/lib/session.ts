@@ -16,6 +16,7 @@ import {
   type PitRow,
   type PositionRow,
   type RaceControlRow,
+  type RadioRow,
   type ResultRow,
   type SessionInfo,
   type StintRow,
@@ -111,6 +112,22 @@ export interface RaceMessage {
   driverNumber: number | null;
 }
 
+export interface RadioClip {
+  date: number;
+  driverNumber: number;
+  url: string;
+}
+
+export interface Telemetry {
+  date: number;
+  speed: number | null;
+  throttle: number | null;
+  brake: number | null;
+  gear: number | null;
+  rpm: number | null;
+  drs: number | null;
+}
+
 export interface Snapshot {
   now: number;
   drivers: Driver[];
@@ -118,11 +135,16 @@ export interface Snapshot {
   trackStatus: TrackStatus;
   weather: Weather;
   messages: RaceMessage[];
+  radio: RadioClip[];
   leaderLap: number;
   totalLaps: number | null;
   fastestLap: { driver: number; time: number } | null;
   bestSectors: ({ driver: number; time: number } | null)[];
 }
+
+/** DRS codes 10, 12 and 14 all mean the flap is open. */
+export const drsOpen = (code: number | null | undefined) =>
+  code === 10 || code === 12 || code === 14;
 
 const ms = (iso: string | null | undefined): number | null => {
   if (!iso) return null;
@@ -372,7 +394,10 @@ export class Session {
   private stints: StintRow[] = [];
   private pits: PitRow[] = [];
   private results: ResultRow[] = [];
+  private radioClips: RadioClip[] = [];
   private location: LocationBuffer;
+  /** Telemetry is fetched per driver on demand; nobody reads twenty traces. */
+  private telemetry = new Map<number, { fetchedAt: number; samples: Telemetry[] }>();
 
   constructor(
     readonly info: SessionInfo,
@@ -437,6 +462,20 @@ export class Session {
       ["weather", async () => this.weather.extend(await openf1.weather(this.sessionKey))],
       ["race control", async () => this.raceControl.extend(await openf1.raceControl(this.sessionKey))],
       ["classification", async () => void (this.results = await openf1.results(this.sessionKey))],
+      [
+        "team radio",
+        async () => {
+          const rows: RadioRow[] = await openf1.teamRadio(this.sessionKey);
+          this.radioClips = rows
+            .map((row) => ({
+              date: ms(row.date) ?? 0,
+              driverNumber: row.driver_number,
+              url: row.recording_url,
+            }))
+            .filter((clip) => clip.date && clip.url)
+            .sort((a, b) => a.date - b.date);
+        },
+      ],
     ];
     for (const [label, run] of steps) {
       onProgress?.(label);
@@ -506,6 +545,98 @@ export class Session {
 
   async ensureLocations(now: number): Promise<void> {
     await this.location.ensure(now, this.clock.isLive);
+  }
+
+  /**
+   * Recent telemetry for one car. Fetched per driver rather than for the field,
+   * because the trace view only ever shows the selected car and `car_data` is
+   * a 4 Hz feed — twenty of those would be megabytes per minute.
+   */
+  async loadTelemetry(driverNumber: number, now: number, windowMs = 45_000): Promise<Telemetry[]> {
+    const cached = this.telemetry.get(driverNumber);
+    if (cached && Math.abs(cached.fetchedAt - now) < windowMs * 0.4) return cached.samples;
+    try {
+      const rows = await openf1.carData(this.sessionKey, {
+        driverNumber,
+        start: new Date(now - windowMs),
+        end: new Date(now + 1000),
+      });
+      const samples = rows
+        .map((row) => ({
+          date: ms(row.date) ?? 0,
+          speed: row.speed,
+          throttle: row.throttle,
+          brake: row.brake,
+          gear: row.n_gear,
+          rpm: row.rpm,
+          drs: row.drs,
+        }))
+        .filter((sample) => sample.date)
+        .sort((a, b) => a.date - b.date);
+      this.telemetry.set(driverNumber, { fetchedAt: now, samples });
+      return samples;
+    } catch {
+      return cached?.samples ?? [];
+    }
+  }
+
+  /**
+   * Completed laps per driver up to `now`, for the analysis charts. Read from
+   * the same lap feed the tower uses, so it inherits the same "has the car
+   * actually crossed the line yet" rule.
+   */
+  lapHistory(now: number): Map<number, { lap: number; time: number; compound: string | null }[]> {
+    const stintFor = (driverNumber: number, lap: number): string | null => {
+      const stint = this.stints.find(
+        (row) => row.driver_number === driverNumber && row.lap_start <= lap && lap <= row.lap_end,
+      );
+      return stint?.compound ?? null;
+    };
+
+    const history = new Map<number, { lap: number; time: number; compound: string | null }[]>();
+    for (const row of this.laps) {
+      const started = ms(row.date_start);
+      if (started == null || row.lap_duration == null) continue;
+      if (started + row.lap_duration * 1000 > now) continue;
+      if (row.is_pit_out_lap) continue;
+      // Safety-car and traffic laps are minutes long and would flatten the
+      // y-axis for every genuine lap on the chart.
+      if (row.lap_duration > 240) continue;
+      const list = history.get(row.driver_number) ?? [];
+      list.push({
+        lap: row.lap_number,
+        time: row.lap_duration,
+        compound: stintFor(row.driver_number, row.lap_number),
+      });
+      history.set(row.driver_number, list);
+    }
+    for (const list of history.values()) list.sort((a, b) => a.lap - b.lap);
+    return history;
+  }
+
+  /** Gap to the leader over time, sampled once per leader lap. */
+  gapHistory(now: number): Map<number, { lap: number; gap: number }[]> {
+    const byDriver = new Map<number, { lap: number; gap: number }[]>();
+    const leaderTimes: { lap: number; at: number }[] = [];
+    for (const row of this.laps) {
+      const started = ms(row.date_start);
+      if (started == null || started > now) continue;
+      const existing = leaderTimes.find((entry) => entry.lap === row.lap_number);
+      if (!existing) leaderTimes.push({ lap: row.lap_number, at: started });
+      else if (started < existing.at) existing.at = started;
+    }
+    leaderTimes.sort((a, b) => a.lap - b.lap);
+
+    for (const { lap, at } of leaderTimes) {
+      for (const [number, { row }] of this.intervals.latestPerDriver(at)) {
+        const value = row.gap_to_leader;
+        if (typeof value !== "number") continue;
+        const list = byDriver.get(number) ?? [];
+        list.push({ lap, gap: value });
+        byDriver.set(number, list);
+      }
+    }
+    return byDriver;
   }
 
   private inferTotalLaps(): void {
@@ -673,6 +804,7 @@ export class Session {
       trackStatus: deriveTrackStatus(messages),
       weather,
       messages,
+      radio: this.radioClips.filter((clip) => clip.date <= now),
       leaderLap,
       totalLaps: this.totalLaps,
       fastestLap,

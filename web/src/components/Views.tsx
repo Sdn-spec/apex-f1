@@ -84,6 +84,23 @@ export function DriverPanel({ driver, snapshot }: { driver: Driver | null; snaps
           className="driver-hero-bg"
           style={{ background: `linear-gradient(105deg, ${driver.colour}, transparent 62%)` }}
         />
+        {driver.headshot && (
+          <motion.img
+            className="driver-photo"
+            src={driver.headshot}
+            alt=""
+            loading="lazy"
+            style={{ borderColor: driver.colour }}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            // F1's CDN serves a generic silhouette when it has no portrait;
+            // an empty frame reads better than a stranger's outline.
+            onError={(event) => {
+              (event.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+          />
+        )}
         <motion.div
           className="driver-num-big"
           style={{ color: driver.colour, position: "relative" }}

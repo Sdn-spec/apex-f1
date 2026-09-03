@@ -4,6 +4,11 @@ A race engineer's wall in your terminal. Live track map, timing tower, tyre
 strategy, race control and championship context for Formula 1 — rendered as a
 TUI, driven by real timing data.
 
+There is a web front end too — **[Apex](web/)** — which shares this data model
+but renders it as an animated browser app: SVG track map, a timing tower that
+reorders on overtakes, telemetry traces, playable team radio, analysis charts
+and a season calendar. See [`web/README.md`](web/README.md).
+
 ```
  Netherlands Race  ·  Zandvoort  ·  4.296 km            GREEN                    LAP 31/72  (41 to go)
  WX Air 18.9°C  Track 31.8°C  Hum 55%  Dry ↑    FASTEST HAM 1:15.514      REPLAY ▐███████░░░░▌ 1x

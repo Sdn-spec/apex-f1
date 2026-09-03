@@ -108,6 +108,23 @@ export interface LocationRow {
   z: number;
 }
 
+export interface RadioRow {
+  date: string;
+  driver_number: number;
+  recording_url: string;
+}
+
+export interface CarDataRow {
+  date: string;
+  driver_number: number;
+  speed: number | null;
+  throttle: number | null;
+  brake: number | null;
+  n_gear: number | null;
+  rpm: number | null;
+  drs: number | null;
+}
+
 export interface ResultRow {
   position: number;
   driver_number: number;
@@ -232,6 +249,19 @@ export const openf1 = {
   results(sessionKey: number) {
     return request<ResultRow[]>(openf1Url("session_result", { session_key: sessionKey })).catch(
       () => [] as ResultRow[],
+    );
+  },
+  teamRadio(sessionKey: number) {
+    return request<RadioRow[]>(openf1Url("team_radio", { session_key: sessionKey }));
+  },
+  carData(sessionKey: number, options: { driverNumber?: number; start?: Date; end?: Date } = {}) {
+    return request<CarDataRow[]>(
+      openf1Url("car_data", {
+        session_key: sessionKey,
+        driver_number: options.driverNumber,
+        [AFTER]: options.start && isoParam(options.start),
+        [BEFORE]: options.end && isoParam(options.end),
+      }),
     );
   },
   location(

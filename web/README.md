@@ -35,13 +35,25 @@ host. `vite.config.ts` sets `base: "./"`, so it works from a subdirectory too.
 | **Race** | Track map with live car positions beside the timing tower |
 | **Timing** | Full classification with sector times, best laps and speed traps |
 | **Strategy** | Every driver's stints laid across race distance, coloured by compound |
-| **Driver** | The selected car: telemetry, stint history, pit stops |
+| **Analysis** | Gap-to-leader and lap-time evolution charts, plus tyre degradation by stint |
+| **Driver** | The selected car: portrait, stint history, pit stops |
+| **Telemetry** | Speed, throttle, brake and gear traces for the selected car |
+| **Radio** | Team radio clips, playable |
 | **Standings** | Drivers' and constructors' championships, past winners at this circuit |
+| **Calendar** | The season, with a live countdown to the next session in your timezone |
 | **Race Control** | Flags, penalties, investigations, deleted laps |
 
-Keys: `1`–`6` switch views, `space` pauses, `←`/`→` seek 30 seconds, `c` toggles
-corner numbers, `l` toggles driver name tags, `s` opens the session picker.
-Clicking a car on the map or a row in the tower selects that driver.
+Keys: `1`–`9`/`0` switch views, `space` pauses, `←`/`→` seek 30 seconds, `c`
+toggles corner numbers, `l` toggles driver name tags, `s` opens the session
+picker. Clicking a car on the map or a row in the tower selects that driver, and
+the driver-scoped views (Driver, Telemetry, and the degradation chart) follow
+that selection.
+
+Team radio comes from OpenF1's links to F1's own static hosting. Those play as
+audio elements, which need no CORS grant — unlike `fetch`, media elements may
+load cross-origin. Telemetry (`car_data`, ~4 Hz) is fetched per driver rather
+than for the field, because twenty simultaneous traces would be megabytes a
+minute and only one car is ever on screen.
 
 ## How the animation is put together
 
