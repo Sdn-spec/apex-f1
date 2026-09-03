@@ -301,6 +301,12 @@ class TimedSeries<T> {
  */
 class LocationBuffer {
   private samples = new Map<number, { dates: number[]; points: { x: number; y: number }[] }>();
+  /**
+   * Coverage is a real interval, not just a forward edge. Tracking only the
+   * far end cannot express "the clock has moved back before what we hold",
+   * which is exactly what rewinding does.
+   */
+  private coveredFrom: number | null = null;
   private coveredTo: number | null = null;
   private fetching = false;
 
@@ -311,16 +317,32 @@ class LocationBuffer {
 
   async ensure(now: number, live: boolean): Promise<void> {
     if (this.fetching) return;
-    if (this.coveredTo != null && now + this.windowMs * 0.35 < this.coveredTo) return;
 
-    let start = this.coveredTo ?? now - 5_000;
-    if (now - start > this.windowMs * 3) {
-      this.samples.clear();
-      start = now - 5_000;
-    }
+    const margin = this.windowMs * 0.35;
+    const inside =
+      this.coveredFrom != null &&
+      this.coveredTo != null &&
+      now >= this.coveredFrom &&
+      now + margin < this.coveredTo;
+    if (inside) return;
+
+    // Extending forward keeps what is already buffered and appends the next
+    // slice. Any other case — a rewind, or a jump past the end — has landed
+    // outside the window entirely, so the buffer is refilled around the new
+    // position instead.
+    const extendsForward =
+      this.coveredFrom != null &&
+      this.coveredTo != null &&
+      now >= this.coveredFrom &&
+      now - this.coveredTo < this.windowMs * 3;
+
+    const refill = !extendsForward;
+    const start = refill ? now - this.windowMs * 0.25 : this.coveredTo!;
     let end = now + this.windowMs;
     if (live) end = Math.min(end, Date.now());
     if (end <= start) return;
+
+    if (refill) this.samples.clear();
 
     this.fetching = true;
     try {
@@ -329,9 +351,17 @@ class LocationBuffer {
         end: new Date(end),
       });
       this.ingest(rows);
+      // Both ends move together and only on success. Recording the new start
+      // before the request lands would, if it failed, leave a window that
+      // claims to cover the clock while holding no samples for it — and since
+      // that claim suppresses the next fetch, the cars would never come back.
+      if (refill) this.coveredFrom = start;
       this.coveredTo = end;
     } catch {
-      // A dropped window just means the cars hold their last position.
+      if (refill) {
+        this.coveredFrom = null;
+        this.coveredTo = null;
+      }
     } finally {
       this.fetching = false;
     }
@@ -348,12 +378,24 @@ class LocationBuffer {
         entry = { dates: [], points: [] };
         this.samples.set(row.driver_number, entry);
       }
-      if (entry.dates.length && date <= entry.dates[entry.dates.length - 1]) continue;
-      entry.dates.push(date);
-      entry.points.push({ x: row.x, y: row.y });
-      if (entry.dates.length > 4000) {
-        entry.dates.splice(0, 2000);
-        entry.points.splice(0, 2000);
+      // Insert in order rather than appending. A window fetched after a seek
+      // can predate what is already held, and an append-only buffer would
+      // silently drop every one of those samples.
+      const at = lowerBound(entry.dates, date);
+      if (entry.dates[at] === date) continue;
+      entry.dates.splice(at, 0, date);
+      entry.points.splice(at, 0, { x: row.x, y: row.y });
+    }
+    this.trim();
+  }
+
+  /** Keep the buffer bounded without discarding the part around the clock. */
+  private trim(): void {
+    for (const entry of this.samples.values()) {
+      const excess = entry.dates.length - 6000;
+      if (excess > 0) {
+        entry.dates.splice(0, excess);
+        entry.points.splice(0, excess);
       }
     }
   }
@@ -362,22 +404,31 @@ class LocationBuffer {
     const entry = this.samples.get(number);
     if (!entry || !entry.dates.length) return null;
     const { dates, points } = entry;
-    let low = 0;
-    let high = dates.length;
-    while (low < high) {
-      const mid = (low + high) >> 1;
-      if (dates[mid] <= now) low = mid + 1;
-      else high = mid;
-    }
-    if (low === 0) return null;
-    if (low >= dates.length) return points[points.length - 1];
-    const spanMs = dates[low] - dates[low - 1];
-    if (spanMs <= 0) return points[low - 1];
-    const ratio = (now - dates[low - 1]) / spanMs;
-    const a = points[low - 1];
-    const b = points[low];
+    const index = lowerBound(dates, now + 1);
+    // Clamp to the ends rather than returning null: while a refill after a
+    // seek is in flight the nearest known point is a better answer than
+    // leaving the car frozen wherever it was last drawn.
+    if (index === 0) return points[0];
+    if (index >= dates.length) return points[points.length - 1];
+    const spanMs = dates[index] - dates[index - 1];
+    if (spanMs <= 0) return points[index - 1];
+    const ratio = (now - dates[index - 1]) / spanMs;
+    const a = points[index - 1];
+    const b = points[index];
     return { x: a.x + (b.x - a.x) * ratio, y: a.y + (b.y - a.y) * ratio };
   }
+}
+
+/** First index whose value is >= target. */
+function lowerBound(values: number[], target: number): number {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (values[mid] < target) low = mid + 1;
+    else high = mid;
+  }
+  return low;
 }
 
 // ---- the session ----------------------------------------------------------

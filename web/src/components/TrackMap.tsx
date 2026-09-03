@@ -106,6 +106,20 @@ function TrackMapImpl({ geometry, drivers, selected, onSelect, showCorners, show
   const labelSize = Math.max(scale * 21, 12);
   const running = drivers.filter((d) => !d.retired && d.x != null && d.y != null);
 
+  // Under a restart queue or a safety car the whole field bunches into a few
+  // car lengths, and twenty overlapping name tags are less readable than none.
+  // Label from the front of the race backwards, skipping any car that would
+  // sit on top of one already labelled.
+  const labelled = new Set<number>();
+  const minGap = view.span * 0.045;
+  for (const driver of [...running].sort((a, b) => (a.position ?? 99) - (b.position ?? 99))) {
+    const clashes = [...labelled].some((number) => {
+      const other = running.find((d) => d.number === number);
+      return other && Math.hypot(other.x! - driver.x!, other.y! - driver.y!) < minGap;
+    });
+    if (!clashes) labelled.add(driver.number);
+  }
+
   return (
     <div className="map-wrap">
       <svg viewBox={view.viewBox} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Circuit map">
@@ -206,7 +220,7 @@ function TrackMapImpl({ geometry, drivers, selected, onSelect, showCorners, show
                 filter={isSelected || leader ? "url(#carGlow)" : undefined}
                 opacity={driver.inPit ? 0.45 : 1}
               />
-              {(showLabels || isSelected) && (
+              {((showLabels && labelled.has(driver.number)) || isSelected) && (
                 <text
                   x={carRadius * 2}
                   y={carRadius * 0.42}
