@@ -817,6 +817,12 @@ async def resolve_session(
     if not rows:
         return None
 
+    if year is None and round_name:
+        # Asking for a circuit whose next running is still ahead — a race
+        # weekend that has not started yet — should show the last time it was
+        # raced, not an empty session, so widen the search to last season too.
+        rows = rows + await client.sessions(year=target_year - 1)
+
     if session_type:
         wanted = session_type.lower()
         rows = [
