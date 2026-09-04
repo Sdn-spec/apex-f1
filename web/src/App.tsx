@@ -17,7 +17,7 @@ import { SessionPicker } from "./components/SessionPicker";
 import { TimingTower } from "./components/TimingTower";
 import { TopBar } from "./components/TopBar";
 import { TrackMap } from "./components/TrackMap";
-import { DriverPanel, RaceControlFeed, StandingsView, StrategyBoard } from "./components/Views";
+import { DriverPanel, DriverRail, RaceControlFeed, StandingsView, StrategyBoard } from "./components/Views";
 import { TelemetryPanel } from "./components/Telemetry";
 import { RadioFeed } from "./components/Radio";
 import { AnalysisView } from "./components/Charts";
@@ -66,6 +66,7 @@ export default function App() {
   const [showCorners, setShowCorners] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [geometryVersion, setGeometryVersion] = useState(0);
+  const [failures, setFailures] = useState<string[]>([]);
 
   const [standings, setStandings] = useState<StandingRow[]>([]);
   const [constructors, setConstructors] = useState<StandingRow[]>([]);
@@ -81,6 +82,10 @@ export default function App() {
     setSnapshot(null);
     setSession(null);
     setError(null);
+    // Clear the selection so the new session picks its own leader rather than
+    // holding a car number that may not even be in this field.
+    setSelected(null);
+    setFailures([]);
     setStatus("finding the session");
 
     try {
@@ -113,6 +118,7 @@ export default function App() {
       await next.ensureLocations(now);
       setSession(next);
       setSnapshot(next.project(now));
+      setFailures([...next.failures]);
     } catch (cause) {
       setError(`Could not load timing data: ${String(cause)}`);
     }
@@ -255,6 +261,16 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePause, seek]);
 
+  // The Driver and Telemetry views are scoped to a single car, so with nothing
+  // selected they open on an empty state — which reads as the app being broken
+  // rather than as an invitation to pick someone. Default to the race leader
+  // as soon as there is a field to choose from.
+  useEffect(() => {
+    if (selected != null || !snapshot?.drivers.length) return;
+    const leader = snapshot.drivers.find((driver) => driver.position === 1) ?? snapshot.drivers[0];
+    setSelected(leader.number);
+  }, [snapshot, selected]);
+
   const selectedDriver = useMemo(
     () => (selected != null ? (snapshot?.byNumber.get(selected) ?? null) : null),
     [selected, snapshot],
@@ -314,6 +330,21 @@ export default function App() {
         circuitLength={session.geometry?.length ?? null}
         onPickSession={() => setPickerOpen(true)}
       />
+
+      {failures.length > 0 && (
+        <div className="feed-warning">
+          <span>
+            Couldn't load {failures.join(", ")} — the timing feed rate-limits when it is busy, so
+            some columns will be blank.
+          </span>
+          <button className="pill" onClick={() => void load(info)}>
+            Retry
+          </button>
+          <button className="pill" onClick={() => setFailures([])}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <nav className="nav">
         {TABS.map((entry) => (
@@ -455,10 +486,11 @@ export default function App() {
             )}
 
             {tab === "driver" && (
-              <div style={{ padding: 14, height: "100%", minHeight: 0 }}>
-                <div className="panel" style={{ height: "100%" }}>
+              <div className="rail-layout">
+                <DriverRail drivers={snapshot.drivers} selected={selected} onSelect={pickDriver} />
+                <div className="panel">
                   <div className="panel-head">
-                    <h2>Driver</h2>
+                    <h2>{selectedDriver ? selectedDriver.fullName : "Driver"}</h2>
                   </div>
                   <div className="panel-body">
                     <DriverPanel driver={selectedDriver} snapshot={snapshot} />
@@ -477,7 +509,18 @@ export default function App() {
             )}
 
             {tab === "telemetry" && (
-              <TelemetryPanel session={session} driver={selectedDriver} now={snapshot.now} />
+              <div className="rail-layout">
+                <DriverRail drivers={snapshot.drivers} selected={selected} onSelect={pickDriver} />
+                <div className="panel">
+                  <div className="panel-head">
+                    <h2>{selectedDriver ? `${selectedDriver.acronym} telemetry` : "Telemetry"}</h2>
+                    <span style={{ fontSize: 11, color: "var(--text-faint)" }}>last 45s</span>
+                  </div>
+                  <div className="panel-body">
+                    <TelemetryPanel session={session} driver={selectedDriver} now={snapshot.now} />
+                  </div>
+                </div>
+              </div>
             )}
 
             {tab === "radio" && (

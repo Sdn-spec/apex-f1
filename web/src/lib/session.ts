@@ -446,6 +446,8 @@ export class Session {
   private pits: PitRow[] = [];
   private results: ResultRow[] = [];
   private radioClips: RadioClip[] = [];
+  /** Feeds that did not load, so the UI can say why a view looks empty. */
+  readonly failures: string[] = [];
   private location: LocationBuffer;
   /** Telemetry is fetched per driver on demand; nobody reads twenty traces. */
   private telemetry = new Map<number, { fetchedAt: number; samples: Telemetry[] }>();
@@ -503,20 +505,26 @@ export class Session {
     }
   }
 
+  /** A session that has ended can never change, so its feeds are cacheable. */
+  get isFinished(): boolean {
+    return Date.now() > this.endTime;
+  }
+
   async loadTiming(onProgress?: (label: string) => void): Promise<void> {
+    const keep = this.isFinished;
     const steps: [string, () => Promise<void>][] = [
-      ["positions", async () => this.position.extend(await openf1.position(this.sessionKey))],
-      ["gaps", async () => this.intervals.extend(await openf1.intervals(this.sessionKey))],
-      ["lap times", async () => void (this.laps = await openf1.laps(this.sessionKey))],
-      ["tyre stints", async () => void (this.stints = await openf1.stints(this.sessionKey))],
-      ["pit stops", async () => void (this.pits = await openf1.pit(this.sessionKey))],
-      ["weather", async () => this.weather.extend(await openf1.weather(this.sessionKey))],
-      ["race control", async () => this.raceControl.extend(await openf1.raceControl(this.sessionKey))],
-      ["classification", async () => void (this.results = await openf1.results(this.sessionKey))],
+      ["positions", async () => this.position.extend(await openf1.position(this.sessionKey, undefined, keep))],
+      ["gaps", async () => this.intervals.extend(await openf1.intervals(this.sessionKey, undefined, keep))],
+      ["lap times", async () => void (this.laps = await openf1.laps(this.sessionKey, undefined, keep))],
+      ["tyre stints", async () => void (this.stints = await openf1.stints(this.sessionKey, keep))],
+      ["pit stops", async () => void (this.pits = await openf1.pit(this.sessionKey, keep))],
+      ["weather", async () => this.weather.extend(await openf1.weather(this.sessionKey, keep))],
+      ["race control", async () => this.raceControl.extend(await openf1.raceControl(this.sessionKey, keep))],
+      ["classification", async () => void (this.results = await openf1.results(this.sessionKey, keep))],
       [
         "team radio",
         async () => {
-          const rows: RadioRow[] = await openf1.teamRadio(this.sessionKey);
+          const rows: RadioRow[] = await openf1.teamRadio(this.sessionKey, keep);
           this.radioClips = rows
             .map((row) => ({
               date: ms(row.date) ?? 0,
@@ -528,12 +536,16 @@ export class Session {
         },
       ],
     ];
+    this.failures.length = 0;
     for (const [label, run] of steps) {
       onProgress?.(label);
       try {
         await run();
       } catch {
-        // A feed that fails leaves its column empty rather than blocking the app.
+        // One failed feed leaves its column empty rather than blocking the
+        // whole app, but it is recorded so the UI can explain the gap instead
+        // of just rendering nothing.
+        this.failures.push(label);
       }
     }
     this.inferTotalLaps();

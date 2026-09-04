@@ -41,9 +41,17 @@ export function TelemetryPanel({ session, driver, now }: Props) {
     // Refetch as the window slides, not on every projection tick.
   }, [session, driver?.number, Math.floor(now / 15_000)]);
 
-  if (!driver) return <div className="empty">Select a driver to see their telemetry.</div>;
+  if (!driver) {
+    return <div className="empty">Pick a car from the timing tower or the track map.</div>;
+  }
   if (!samples.length) {
-    return <div className="empty">{loading ? "Loading telemetry…" : "No telemetry for this window."}</div>;
+    return (
+      <div className="empty">
+        {loading
+          ? `Loading ${driver.acronym}'s telemetry…`
+          : `No telemetry for ${driver.acronym} around this moment — the feed has gaps when a car is stopped or the session is suspended. Try scrubbing to a point where the race is running.`}
+      </div>
+    );
   }
 
   const latest = samples[samples.length - 1];

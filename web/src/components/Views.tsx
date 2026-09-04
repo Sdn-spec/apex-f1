@@ -71,7 +71,7 @@ export function StrategyBoard({ snapshot }: { snapshot: Snapshot }) {
 // ---- driver detail --------------------------------------------------------
 
 export function DriverPanel({ driver, snapshot }: { driver: Driver | null; snapshot: Snapshot }) {
-  if (!driver) return <div className="empty">Select a driver from the timing tower.</div>;
+  if (!driver) return <div className="empty">Pick a car from the timing tower or the track map.</div>;
 
   const last = driver.lastLap;
   const stint = driver.stints.at(-1);
@@ -394,6 +394,73 @@ export function RaceControlFeed({ messages }: { messages: RaceMessage[] }) {
           </motion.div>
         );
       })}
+    </div>
+  );
+}
+
+// ---- driver rail ----------------------------------------------------------
+
+/**
+ * The Driver and Telemetry views are scoped to a single car, which leaves them
+ * looking like a one-driver app unless the rest of the field sits beside them.
+ * This rail is that field: every entry in the session, pickable, carrying just
+ * enough context — position, tyre, last lap — to choose from without having to
+ * go back to the timing tower.
+ */
+export function DriverRail({
+  drivers,
+  selected,
+  onSelect,
+}: {
+  drivers: Driver[];
+  selected: number | null;
+  onSelect: (number: number) => void;
+}) {
+  return (
+    <div className="panel driver-rail">
+      <div className="panel-head">
+        <h2>Drivers</h2>
+        <span style={{ fontSize: 11, color: "var(--text-faint)" }}>{drivers.length} cars</span>
+      </div>
+      <div className="panel-body">
+        {drivers.map((driver, index) => {
+          const stint = driver.stints.at(-1);
+          const age = stint
+            ? stint.tyreAgeAtStart + Math.max(driver.lapNumber - stint.lapStart, 0)
+            : null;
+          return (
+            <motion.button
+              key={driver.number}
+              type="button"
+              className="rail-row"
+              data-on={selected === driver.number}
+              data-out={driver.retired}
+              onClick={() => onSelect(driver.number)}
+              {...stagger(index)}
+            >
+              <i className="rail-bar" style={{ background: driver.colour }} />
+              <span className="rail-pos tnum">{driver.position ?? "–"}</span>
+              <span className="rail-name">
+                <b>{driver.acronym}</b>
+                <em>{driver.team}</em>
+              </span>
+              <span className="rail-tail">
+                {stint && (
+                  <span
+                    className="rail-tyre"
+                    style={{ color: compoundColour(stint.compound) }}
+                    title={`${stint.compound ?? "unknown"}${age != null ? ` · ${age} laps` : ""}`}
+                  >
+                    {compoundLetter(stint.compound)}
+                    {age != null && <small>{age}</small>}
+                  </span>
+                )}
+                <span className="tnum rail-lap">{lapTime(driver.lastLap?.duration ?? null)}</span>
+              </span>
+            </motion.button>
+          );
+        })}
+      </div>
     </div>
   );
 }

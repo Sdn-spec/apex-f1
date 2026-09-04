@@ -82,14 +82,24 @@ button {
 
 /* ---- shell ---- */
 
+/* Flex rather than fixed grid rows: the chrome above the stage varies (a feed
+   warning appears only when a feed failed), and a fixed row template would
+   hand the 1fr row to the wrong child whenever that count changes. */
 .app {
-  display: grid;
-  grid-template-rows: auto auto 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
 }
 
+.topbar,
+.nav,
+.feed-warning {
+  flex: none;
+}
+
 .stage {
+  flex: 1;
   min-height: 0;
   overflow: hidden;
   position: relative;
@@ -320,6 +330,20 @@ button {
   inset: 0 auto 0 0;
   background: linear-gradient(90deg, #e8002d, #ff5a3c);
   border-radius: 99px;
+}
+
+.feed-warning {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 18px;
+  font-size: 12px;
+  color: #ffd970;
+  background: rgba(255, 209, 46, 0.09);
+  border-bottom: 1px solid rgba(255, 209, 46, 0.22);
+}
+.feed-warning span {
+  flex: 1;
 }
 
 /* ---- panels ---- */
@@ -1068,5 +1092,108 @@ button {
   * {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---- driver rail --------------------------------------------------------- */
+
+/* Two independently scrolling columns: the field on the left stays put while
+   the detail on the right runs long. */
+.rail-layout {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+  height: 100%;
+  min-height: 0;
+}
+.rail-layout > .panel {
+  min-height: 0;
+}
+
+.driver-rail .panel-body {
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rail-row {
+  display: grid;
+  grid-template-columns: 3px 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+.rail-row:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+.rail-row[data-on="true"] {
+  background: rgba(255, 255, 255, 0.075);
+  border-color: var(--line);
+}
+.rail-row[data-out="true"] {
+  opacity: 0.42;
+}
+
+.rail-bar {
+  height: 22px;
+  border-radius: 2px;
+}
+.rail-pos {
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: right;
+}
+.rail-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.rail-name b {
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+}
+.rail-name em {
+  font-style: normal;
+  font-size: 9.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rail-tail {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.rail-tyre {
+  font-size: 11px;
+  font-weight: 700;
+}
+.rail-tyre small {
+  font-size: 8.5px;
+  opacity: 0.72;
+  margin-left: 1px;
+}
+.rail-lap {
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+@media (max-width: 900px) {
+  .rail-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 190px minmax(0, 1fr);
   }
 }

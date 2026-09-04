@@ -173,13 +173,46 @@ class RequestQueue {
 const queue = new RequestQueue(3);
 const memo = new Map<string, unknown>();
 
+/**
+ * Responses for a session that has already ended never change, so they are
+ * kept in the browser's Cache Storage. Without it every reload re-downloads
+ * several megabytes of timing and quickly trips the feed's rate limit — which
+ * shows up as views that render empty for no visible reason.
+ */
+const CACHE_NAME = "apex-timing-v1";
+let cacheHandle: Promise<Cache | null> | null = null;
+
+function openCache(): Promise<Cache | null> {
+  if (!cacheHandle) {
+    cacheHandle =
+      typeof caches === "undefined"
+        ? Promise.resolve(null)
+        : caches.open(CACHE_NAME).catch(() => null);
+  }
+  return cacheHandle;
+}
+
 export class ApiError extends Error {}
 
 async function request<T>(
   url: string,
-  { retries = 3, cache = false }: { retries?: number; cache?: boolean } = {},
+  {
+    retries = 3,
+    cache = false,
+    persist = false,
+  }: { retries?: number; cache?: boolean; persist?: boolean } = {},
 ): Promise<T> {
-  if (cache && memo.has(url)) return memo.get(url) as T;
+  if ((cache || persist) && memo.has(url)) return memo.get(url) as T;
+
+  if (persist) {
+    const store = await openCache();
+    const hit = await store?.match(url).catch(() => undefined);
+    if (hit) {
+      const payload = (await hit.json()) as T;
+      memo.set(url, payload);
+      return payload;
+    }
+  }
 
   let lastError: unknown;
   for (let attempt = 0; attempt < retries; attempt += 1) {
@@ -191,8 +224,13 @@ async function request<T>(
         continue;
       }
       if (!response.ok) throw new ApiError(`${response.status} ${response.statusText}`);
+      if (persist) {
+        const store = await openCache();
+        // put() consumes the body, so the copy has to be taken first.
+        await store?.put(url, response.clone()).catch(() => undefined);
+      }
       const payload = (await response.json()) as T;
-      if (cache) memo.set(url, payload);
+      if (cache || persist) memo.set(url, payload);
       return payload;
     } catch (error) {
       lastError = error;
@@ -219,40 +257,45 @@ export const openf1 = {
   drivers(sessionKey: number) {
     return request<DriverRow[]>(openf1Url("drivers", { session_key: sessionKey }), { cache: true });
   },
-  position(sessionKey: number, since?: Date) {
+  position(sessionKey: number, since?: Date, persist = false) {
     return request<PositionRow[]>(
       openf1Url("position", { session_key: sessionKey, [AFTER]: since && isoParam(since) }),
+      { persist: persist && !since },
     );
   },
-  intervals(sessionKey: number, since?: Date) {
+  intervals(sessionKey: number, since?: Date, persist = false) {
     return request<IntervalRow[]>(
       openf1Url("intervals", { session_key: sessionKey, [AFTER]: since && isoParam(since) }),
+      { persist: persist && !since },
     );
   },
-  laps(sessionKey: number, driverNumber?: number) {
+  laps(sessionKey: number, driverNumber?: number, persist = false) {
     return request<LapRow[]>(
       openf1Url("laps", { session_key: sessionKey, driver_number: driverNumber }),
+      { persist },
     );
   },
-  stints(sessionKey: number) {
-    return request<StintRow[]>(openf1Url("stints", { session_key: sessionKey }));
+  stints(sessionKey: number, persist = false) {
+    return request<StintRow[]>(openf1Url("stints", { session_key: sessionKey }), { persist });
   },
-  pit(sessionKey: number) {
-    return request<PitRow[]>(openf1Url("pit", { session_key: sessionKey }));
+  pit(sessionKey: number, persist = false) {
+    return request<PitRow[]>(openf1Url("pit", { session_key: sessionKey }), { persist });
   },
-  weather(sessionKey: number) {
-    return request<WeatherRow[]>(openf1Url("weather", { session_key: sessionKey }));
+  weather(sessionKey: number, persist = false) {
+    return request<WeatherRow[]>(openf1Url("weather", { session_key: sessionKey }), { persist });
   },
-  raceControl(sessionKey: number) {
-    return request<RaceControlRow[]>(openf1Url("race_control", { session_key: sessionKey }));
+  raceControl(sessionKey: number, persist = false) {
+    return request<RaceControlRow[]>(openf1Url("race_control", { session_key: sessionKey }), {
+      persist,
+    });
   },
-  results(sessionKey: number) {
-    return request<ResultRow[]>(openf1Url("session_result", { session_key: sessionKey })).catch(
-      () => [] as ResultRow[],
-    );
+  results(sessionKey: number, persist = false) {
+    return request<ResultRow[]>(openf1Url("session_result", { session_key: sessionKey }), {
+      persist,
+    }).catch(() => [] as ResultRow[]);
   },
-  teamRadio(sessionKey: number) {
-    return request<RadioRow[]>(openf1Url("team_radio", { session_key: sessionKey }));
+  teamRadio(sessionKey: number, persist = false) {
+    return request<RadioRow[]>(openf1Url("team_radio", { session_key: sessionKey }), { persist });
   },
   carData(sessionKey: number, options: { driverNumber?: number; start?: Date; end?: Date } = {}) {
     return request<CarDataRow[]>(
@@ -275,7 +318,7 @@ export const openf1 = {
         [AFTER]: options.start && isoParam(options.start),
         [BEFORE]: options.end && isoParam(options.end),
       }),
-      { cache: options.cache ?? false },
+      { cache: options.cache ?? false, persist: options.cache ?? false },
     );
   },
 };
