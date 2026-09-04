@@ -10,7 +10,14 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { history, type HistoryRace, type SessionInfo, type StandingRow } from "./lib/api";
+import {
+  diagnoseFeeds,
+  history,
+  type FeedFault,
+  type HistoryRace,
+  type SessionInfo,
+  type StandingRow,
+} from "./lib/api";
 import { LiveClock, ReplayClock, Session, resolveSession, type Snapshot } from "./lib/session";
 import { clockTime } from "./lib/format";
 import { SessionPicker } from "./components/SessionPicker";
@@ -22,6 +29,7 @@ import { TelemetryPanel } from "./components/Telemetry";
 import { RadioFeed } from "./components/Radio";
 import { AnalysisView } from "./components/Charts";
 import { CalendarView } from "./components/Calendar";
+import { LimitedMode } from "./components/Limited";
 
 type Tab =
   | "race"
@@ -57,6 +65,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [status, setStatus] = useState("finding the latest session");
   const [error, setError] = useState<string | null>(null);
+  const [fault, setFault] = useState<FeedFault>("ok");
   const [tab, setTab] = useState<Tab>("race");
   const [selected, setSelected] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -82,6 +91,7 @@ export default function App() {
     setSnapshot(null);
     setSession(null);
     setError(null);
+    setFault("ok");
     // Clear the selection so the new session picks its own leader rather than
     // holding a car number that may not even be in this field.
     setSelected(null);
@@ -91,6 +101,7 @@ export default function App() {
     try {
       const chosen = target ?? (await resolveSession({}));
       if (!chosen) {
+        setFault(await diagnoseFeeds());
         setError("No sessions found in the timing feed.");
         return;
       }
@@ -120,7 +131,10 @@ export default function App() {
       setSnapshot(next.project(now));
       setFailures([...next.failures]);
     } catch (cause) {
-      setError(`Could not load timing data: ${String(cause)}`);
+      // A failure here is almost never something the reader can act on as
+      // written, so ask both feeds who is actually down before reporting.
+      setFault(await diagnoseFeeds());
+      setError(String(cause));
     }
   }, []);
 
@@ -283,6 +297,11 @@ export default function App() {
   // ---- render -------------------------------------------------------------
 
   if (error) {
+    // A feed-level outage gets the explanatory screen, which keeps the views
+    // that do not need that feed alive. Anything else is a genuine one-off.
+    if (fault !== "ok") {
+      return <LimitedMode fault={fault} detail={error} onRetry={() => void load()} />;
+    }
     return (
       <div className="boot">
         <div className="boot-inner">

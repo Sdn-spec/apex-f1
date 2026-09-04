@@ -1197,3 +1197,106 @@ button {
     grid-template-rows: 190px minmax(0, 1fr);
   }
 }
+
+/* ---- limited mode -------------------------------------------------------- */
+
+.limited {
+  height: 100%;
+  overflow: auto;
+  padding: 28px 22px 40px;
+}
+.limited-note {
+  max-width: 760px;
+  margin: 0 auto 26px;
+  padding: 22px 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(28, 24, 20, 0.9), rgba(16, 15, 20, 0.9));
+}
+.limited-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.limited-badge {
+  align-self: flex-start;
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: #ffc95c;
+  background: rgba(255, 184, 0, 0.14);
+  border: 1px solid rgba(255, 184, 0, 0.3);
+}
+.limited-note h1 {
+  margin: 0;
+  font-size: 21px;
+  letter-spacing: -0.01em;
+}
+.limited-note p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.62;
+  color: var(--text-dim);
+  max-width: 68ch;
+}
+.limited-dim {
+  color: var(--text-faint) !important;
+}
+.limited-key {
+  margin: 18px 0 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.limited-key label {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-bottom: 9px;
+}
+.limited-key-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.limited-key-row input {
+  flex: 1;
+  min-width: 220px;
+  padding: 8px 11px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.limited-key-row input:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+.limited-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.limited-detail {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  opacity: 0.75;
+  word-break: break-all;
+}
+.limited-caption {
+  max-width: 760px;
+  margin: 0 auto;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  padding: 0 4px 4px;
+}
+.limited-body {
+  max-width: 1180px;
+  margin: 0 auto;
+}
