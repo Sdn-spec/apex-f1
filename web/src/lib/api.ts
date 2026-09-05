@@ -173,26 +173,116 @@ class RequestQueue {
 const queue = new RequestQueue(3);
 const memo = new Map<string, unknown>();
 
+/**
+ * Responses for a session that has already ended never change, so they are
+ * kept in the browser's Cache Storage. Without it every reload re-downloads
+ * several megabytes of timing and quickly trips the feed's rate limit — which
+ * shows up as views that render empty for no visible reason.
+ */
+const CACHE_NAME = "apex-timing-v1";
+let cacheHandle: Promise<Cache | null> | null = null;
+
+function openCache(): Promise<Cache | null> {
+  if (!cacheHandle) {
+    cacheHandle =
+      typeof caches === "undefined"
+        ? Promise.resolve(null)
+        : caches.open(CACHE_NAME).catch(() => null);
+  }
+  return cacheHandle;
+}
+
 export class ApiError extends Error {}
+
+/**
+ * OpenF1 is free for historical data but closes global access — archives
+ * included — to unauthenticated callers whenever a session is actually
+ * running, which is exactly when this app is most wanted. A sponsor key
+ * lifts that. It lives in localStorage because there is no server to keep
+ * it on, so it never leaves this browser.
+ */
+const KEY_STORAGE = "apex-openf1-key";
+
+export function openf1Key(): string | null {
+  try {
+    return localStorage.getItem(KEY_STORAGE) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setOpenf1Key(key: string | null): void {
+  try {
+    if (key) localStorage.setItem(KEY_STORAGE, key);
+    else localStorage.removeItem(KEY_STORAGE);
+  } catch {
+    // Private browsing; the key simply will not persist.
+  }
+  memo.clear();
+}
+
+/**
+ * The lockout response carries no CORS header, so a browser cannot read its
+ * 401 — every blocked call surfaces as an indistinguishable `TypeError:
+ * Failed to fetch`. Telling "the feed is refusing us" apart from "this
+ * machine is offline" therefore needs a second opinion from another origin.
+ */
+export type FeedFault = "ok" | "openf1-unreachable" | "offline";
+
+export async function diagnoseFeeds(): Promise<FeedFault> {
+  const reachable = (url: string) =>
+    fetch(url, { headers: { Accept: "application/json" } })
+      .then((response) => response.ok)
+      .catch(() => false);
+
+  const [openf1Ok, jolpicaOk] = await Promise.all([
+    reachable(openf1Url("sessions", { year: new Date().getFullYear() })),
+    reachable(`${JOLPICA}/current.json?limit=1`),
+  ]);
+  if (openf1Ok) return "ok";
+  return jolpicaOk ? "openf1-unreachable" : "offline";
+}
 
 async function request<T>(
   url: string,
-  { retries = 3, cache = false }: { retries?: number; cache?: boolean } = {},
+  {
+    retries = 3,
+    cache = false,
+    persist = false,
+  }: { retries?: number; cache?: boolean; persist?: boolean } = {},
 ): Promise<T> {
-  if (cache && memo.has(url)) return memo.get(url) as T;
+  if ((cache || persist) && memo.has(url)) return memo.get(url) as T;
+
+  if (persist) {
+    const store = await openCache();
+    const hit = await store?.match(url).catch(() => undefined);
+    if (hit) {
+      const payload = (await hit.json()) as T;
+      memo.set(url, payload);
+      return payload;
+    }
+  }
 
   let lastError: unknown;
   for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
-      const response = await queue.run(() => fetch(url, { headers: { Accept: "application/json" } }));
+      const headers: Record<string, string> = { Accept: "application/json" };
+      const key = openf1Key();
+      if (key && url.startsWith(OPENF1)) headers.Authorization = `Bearer ${key}`;
+      const response = await queue.run(() => fetch(url, { headers }));
       if (response.status === 429) {
         lastError = new ApiError("rate limited");
         await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
         continue;
       }
       if (!response.ok) throw new ApiError(`${response.status} ${response.statusText}`);
+      if (persist) {
+        const store = await openCache();
+        // put() consumes the body, so the copy has to be taken first.
+        await store?.put(url, response.clone()).catch(() => undefined);
+      }
       const payload = (await response.json()) as T;
-      if (cache) memo.set(url, payload);
+      if (cache || persist) memo.set(url, payload);
       return payload;
     } catch (error) {
       lastError = error;
@@ -219,40 +309,49 @@ export const openf1 = {
   drivers(sessionKey: number) {
     return request<DriverRow[]>(openf1Url("drivers", { session_key: sessionKey }), { cache: true });
   },
-  position(sessionKey: number, since?: Date) {
+  position(sessionKey: number, since?: Date, persist = false) {
     return request<PositionRow[]>(
       openf1Url("position", { session_key: sessionKey, [AFTER]: since && isoParam(since) }),
+      { persist: persist && !since },
     );
   },
-  intervals(sessionKey: number, since?: Date) {
+  intervals(sessionKey: number, since?: Date, persist = false) {
     return request<IntervalRow[]>(
       openf1Url("intervals", { session_key: sessionKey, [AFTER]: since && isoParam(since) }),
+      { persist: persist && !since },
     );
   },
-  laps(sessionKey: number, driverNumber?: number) {
+  laps(sessionKey: number, driverNumber?: number, persist = false) {
     return request<LapRow[]>(
       openf1Url("laps", { session_key: sessionKey, driver_number: driverNumber }),
+      { persist },
     );
   },
-  stints(sessionKey: number) {
-    return request<StintRow[]>(openf1Url("stints", { session_key: sessionKey }));
+  stints(sessionKey: number, persist = false) {
+    return request<StintRow[]>(openf1Url("stints", { session_key: sessionKey }), { persist });
   },
-  pit(sessionKey: number) {
-    return request<PitRow[]>(openf1Url("pit", { session_key: sessionKey }));
+  pit(sessionKey: number, persist = false) {
+    return request<PitRow[]>(openf1Url("pit", { session_key: sessionKey }), { persist });
   },
-  weather(sessionKey: number) {
-    return request<WeatherRow[]>(openf1Url("weather", { session_key: sessionKey }));
-  },
-  raceControl(sessionKey: number) {
-    return request<RaceControlRow[]>(openf1Url("race_control", { session_key: sessionKey }));
-  },
-  results(sessionKey: number) {
-    return request<ResultRow[]>(openf1Url("session_result", { session_key: sessionKey })).catch(
-      () => [] as ResultRow[],
+  weather(sessionKey: number, since?: Date, persist = false) {
+    return request<WeatherRow[]>(
+      openf1Url("weather", { session_key: sessionKey, [AFTER]: since && isoParam(since) }),
+      { persist: persist && !since },
     );
   },
-  teamRadio(sessionKey: number) {
-    return request<RadioRow[]>(openf1Url("team_radio", { session_key: sessionKey }));
+  raceControl(sessionKey: number, since?: Date, persist = false) {
+    return request<RaceControlRow[]>(
+      openf1Url("race_control", { session_key: sessionKey, [AFTER]: since && isoParam(since) }),
+      { persist: persist && !since },
+    );
+  },
+  results(sessionKey: number, persist = false) {
+    return request<ResultRow[]>(openf1Url("session_result", { session_key: sessionKey }), {
+      persist,
+    }).catch(() => [] as ResultRow[]);
+  },
+  teamRadio(sessionKey: number, persist = false) {
+    return request<RadioRow[]>(openf1Url("team_radio", { session_key: sessionKey }), { persist });
   },
   carData(sessionKey: number, options: { driverNumber?: number; start?: Date; end?: Date } = {}) {
     return request<CarDataRow[]>(
@@ -275,7 +374,7 @@ export const openf1 = {
         [AFTER]: options.start && isoParam(options.start),
         [BEFORE]: options.end && isoParam(options.end),
       }),
-      { cache: options.cache ?? false },
+      { cache: options.cache ?? false, persist: options.cache ?? false },
     );
   },
 };
@@ -299,6 +398,9 @@ export interface StandingRow {
 export interface HistoryRace {
   season: string;
   raceName: string;
+  round?: string;
+  date?: string;
+  time?: string;
   Circuit?: { circuitId: string; circuitName: string; Location?: Record<string, string> };
   Results?: {
     position: string;

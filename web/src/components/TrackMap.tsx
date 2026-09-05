@@ -196,6 +196,8 @@ function TrackMapImpl({ geometry, drivers, selected, onSelect, showCorners, show
           return (
             <g
               key={driver.number}
+              className="car"
+              data-driver={driver.number}
               ref={(node) => {
                 if (node) groupRefs.current.set(driver.number, node);
                 else groupRefs.current.delete(driver.number);

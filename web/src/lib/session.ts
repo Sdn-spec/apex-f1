@@ -34,6 +34,16 @@ const MAX_PIT_WINDOW = 90_000;
  */
 const RETIREMENT_SILENCE = 210_000;
 
+/**
+ * Live pacing. Car positions arrive at roughly 3.7 Hz, so a four-second poll
+ * still collects a dozen samples per car — enough to interpolate smoothly —
+ * while the feeds that only change once a lap are read at a fifth of that
+ * rate. Polling everything at the animation cadence is what exhausts the
+ * API's rate limit over a race distance.
+ */
+const LIVE_POLL_MS = 4_000;
+const SLOW_POLL_MS = 20_000;
+
 export type TrackStatus =
   | "GREEN"
   | "YELLOW"
@@ -159,10 +169,23 @@ export interface Clock {
   readonly isLive: boolean;
 }
 
+/**
+ * How far behind wall time the live clock runs.
+ *
+ * A sample stamped "now" has not reached the API yet — the car has to report
+ * it, the feed has to ingest it and we have to fetch it. Drawing the present
+ * instant therefore means drawing a moment for which nothing has arrived, so
+ * every car sits clamped at its last known point. Running a few seconds in
+ * arrears means the moment on screen is one the feed has actually delivered,
+ * which is the difference between interpolating between real samples and
+ * showing a frozen grid.
+ */
+export const LIVE_LAG_MS = 8_000;
+
 export class LiveClock implements Clock {
   readonly isLive = true;
   now() {
-    return Date.now();
+    return Date.now() - LIVE_LAG_MS;
   }
 }
 
@@ -309,6 +332,7 @@ class LocationBuffer {
   private coveredFrom: number | null = null;
   private coveredTo: number | null = null;
   private fetching = false;
+  private lastFetch = 0;
 
   constructor(
     private readonly sessionKey: number,
@@ -318,13 +342,20 @@ class LocationBuffer {
   async ensure(now: number, live: boolean): Promise<void> {
     if (this.fetching) return;
 
-    const margin = this.windowMs * 0.35;
+    // A replay can buffer ahead because the whole session already exists, so
+    // it refills once the clock comes within a margin of the far edge. A live
+    // session has no ahead to buffer: the newest sample the feed can offer is
+    // roughly wall time, so that margin is a test which can never pass and
+    // asking for it refetches on every single tick. Live coverage is judged
+    // only on whether the clock sits inside the buffer, and paced instead by
+    // a poll interval.
+    const margin = live ? 0 : this.windowMs * 0.35;
     const inside =
       this.coveredFrom != null &&
       this.coveredTo != null &&
       now >= this.coveredFrom &&
       now + margin < this.coveredTo;
-    if (inside) return;
+    if (inside && (!live || Date.now() - this.lastFetch < LIVE_POLL_MS)) return;
 
     // Extending forward keeps what is already buffered and appends the next
     // slice. Any other case — a rewind, or a jump past the end — has landed
@@ -364,6 +395,9 @@ class LocationBuffer {
       }
     } finally {
       this.fetching = false;
+      // Paces the next live poll whether or not this one landed: a failing
+      // feed must not turn into a retry on every animation tick.
+      this.lastFetch = Date.now();
     }
   }
 
@@ -446,6 +480,8 @@ export class Session {
   private pits: PitRow[] = [];
   private results: ResultRow[] = [];
   private radioClips: RadioClip[] = [];
+  /** Feeds that did not load, so the UI can say why a view looks empty. */
+  readonly failures: string[] = [];
   private location: LocationBuffer;
   /** Telemetry is fetched per driver on demand; nobody reads twenty traces. */
   private telemetry = new Map<number, { fetchedAt: number; samples: Telemetry[] }>();
@@ -503,20 +539,26 @@ export class Session {
     }
   }
 
+  /** A session that has ended can never change, so its feeds are cacheable. */
+  get isFinished(): boolean {
+    return Date.now() > this.endTime;
+  }
+
   async loadTiming(onProgress?: (label: string) => void): Promise<void> {
+    const keep = this.isFinished;
     const steps: [string, () => Promise<void>][] = [
-      ["positions", async () => this.position.extend(await openf1.position(this.sessionKey))],
-      ["gaps", async () => this.intervals.extend(await openf1.intervals(this.sessionKey))],
-      ["lap times", async () => void (this.laps = await openf1.laps(this.sessionKey))],
-      ["tyre stints", async () => void (this.stints = await openf1.stints(this.sessionKey))],
-      ["pit stops", async () => void (this.pits = await openf1.pit(this.sessionKey))],
-      ["weather", async () => this.weather.extend(await openf1.weather(this.sessionKey))],
-      ["race control", async () => this.raceControl.extend(await openf1.raceControl(this.sessionKey))],
-      ["classification", async () => void (this.results = await openf1.results(this.sessionKey))],
+      ["positions", async () => this.position.extend(await openf1.position(this.sessionKey, undefined, keep))],
+      ["gaps", async () => this.intervals.extend(await openf1.intervals(this.sessionKey, undefined, keep))],
+      ["lap times", async () => void (this.laps = await openf1.laps(this.sessionKey, undefined, keep))],
+      ["tyre stints", async () => void (this.stints = await openf1.stints(this.sessionKey, keep))],
+      ["pit stops", async () => void (this.pits = await openf1.pit(this.sessionKey, keep))],
+      ["weather", async () => this.weather.extend(await openf1.weather(this.sessionKey, undefined, keep))],
+      ["race control", async () => this.raceControl.extend(await openf1.raceControl(this.sessionKey, undefined, keep))],
+      ["classification", async () => void (this.results = await openf1.results(this.sessionKey, keep))],
       [
         "team radio",
         async () => {
-          const rows: RadioRow[] = await openf1.teamRadio(this.sessionKey);
+          const rows: RadioRow[] = await openf1.teamRadio(this.sessionKey, keep);
           this.radioClips = rows
             .map((row) => ({
               date: ms(row.date) ?? 0,
@@ -528,12 +570,16 @@ export class Session {
         },
       ],
     ];
+    this.failures.length = 0;
     for (const [label, run] of steps) {
       onProgress?.(label);
       try {
         await run();
       } catch {
-        // A feed that fails leaves its column empty rather than blocking the app.
+        // One failed feed leaves its column empty rather than blocking the
+        // whole app, but it is recorded so the UI can explain the gap instead
+        // of just rendering nothing.
+        this.failures.push(label);
       }
     }
     this.inferTotalLaps();
@@ -574,19 +620,45 @@ export class Session {
     return null;
   }
 
+  private lastSlowPoll = 0;
+
+  /**
+   * Two cadences, because the feeds move at two very different speeds.
+   *
+   * Positions and gaps change every second and both accept a `date>` filter,
+   * so following them costs a handful of rows per poll. Laps, stints, pits,
+   * weather and race control change once a lap at most, and the first three
+   * have no incremental filter at all — each read returns the whole table,
+   * which grows all race. Refetching those at the animation cadence was the
+   * bulk of the request volume for none of the freshness.
+   */
   async pollLive(): Promise<void> {
     if (!this.clock.isLive) return;
-    const [positions, intervals, laps, stints, pits, weather, control] = await Promise.all([
+
+    const [positions, intervals] = await Promise.all([
       openf1.position(this.sessionKey, this.position.newest ? new Date(this.position.newest) : undefined).catch(() => []),
       openf1.intervals(this.sessionKey, this.intervals.newest ? new Date(this.intervals.newest) : undefined).catch(() => []),
-      openf1.laps(this.sessionKey).catch(() => this.laps),
-      openf1.stints(this.sessionKey).catch(() => this.stints),
-      openf1.pit(this.sessionKey).catch(() => this.pits),
-      openf1.weather(this.sessionKey).catch(() => []),
-      openf1.raceControl(this.sessionKey).catch(() => []),
     ]);
     this.position.extend(positions);
     this.intervals.extend(intervals);
+
+    if (Date.now() - this.lastSlowPoll < SLOW_POLL_MS) return;
+    this.lastSlowPoll = Date.now();
+
+    const [laps, stints, pits, weather, control] = await Promise.all([
+      openf1.laps(this.sessionKey).catch(() => this.laps),
+      openf1.stints(this.sessionKey).catch(() => this.stints),
+      openf1.pit(this.sessionKey).catch(() => this.pits),
+      openf1
+        .weather(this.sessionKey, this.weather.newest ? new Date(this.weather.newest) : undefined)
+        .catch(() => []),
+      openf1
+        .raceControl(
+          this.sessionKey,
+          this.raceControl.newest ? new Date(this.raceControl.newest) : undefined,
+        )
+        .catch(() => []),
+    ]);
     this.laps = laps;
     this.stints = stints;
     this.pits = pits;
